@@ -1001,6 +1001,9 @@
         }
       }
     },
+    "%lld°" : {
+
+    },
     "• Bug fixes" : {
       "localizations" : {
         "ar" : {
@@ -9408,6 +9411,9 @@
         }
       }
     },
+    "Feels like %@" : {
+
+    },
     "Files dropped on the shelf will be shared via this service" : {
       "localizations" : {
         "ar" : {
@@ -10404,6 +10410,16 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "渐变"
+          }
+        }
+      }
+    },
+    "H %@  L %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "H %1$@  L %2$@"
           }
         }
       }
@@ -11607,6 +11623,9 @@
           }
         }
       }
+    },
+    "Humidity %@%%" : {
+
     },
     "In progress" : {
       "localizations" : {
@@ -22815,6 +22834,9 @@
         }
       }
     },
+    "Weather" : {
+
+    },
     "Welcome" : {
       "localizations" : {
         "ar" : {
@@ -23011,6 +23033,16 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "更新内容"
+          }
+        }
+      }
+    },
+    "Wind %@ %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Wind %1$@ %2$@"
           }
         }
       }
