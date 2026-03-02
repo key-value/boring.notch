@@ -184,43 +184,34 @@ struct CalendarView: View {
     @State private var selectedDate = Date()
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: 8) {
-                VStack(alignment: .leading) {
-                    Text(selectedDate.formatted(.dateTime.month(.abbreviated)))
-                        .font(.title3)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.white)
-                    Text(selectedDate.formatted(.dateTime.year()))
-                        .font(.title3)
-                        .fontWeight(.light)
-                        .foregroundColor(Color(white: 0.65))
-                }
-
-                ZStack(alignment: .top) {
-                    WheelPicker(selectedDate: $selectedDate, config: Config())
-                    HStack(alignment: .top) {
-                        LinearGradient(
-                            colors: [Color.black, .clear], startPoint: .leading, endPoint: .trailing
-                        )
-                        .frame(width: 20)
-                        Spacer()
-                        LinearGradient(
-                            colors: [.clear, Color.black], startPoint: .leading, endPoint: .trailing
-                        )
-                        .frame(width: 20)
+        VStack(spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(selectedDate.formatted(.dateTime.month(.abbreviated)))
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.white)
+                Text(selectedDate.formatted(.dateTime.year()))
+                    .font(.headline)
+                    .fontWeight(.light)
+                    .foregroundColor(Color(white: 0.65))
+                Spacer(minLength: 0)
+                HStack(spacing: 6) {
+                    navButton(systemName: "chevron.up") {
+                        shiftSelectedDate(years: -1)
+                    }
+                    navButton(systemName: "chevron.left") {
+                        shiftSelectedDate(months: -1)
+                    }
+                    navButton(systemName: "chevron.right") {
+                        shiftSelectedDate(months: 1)
+                    }
+                    navButton(systemName: "chevron.down") {
+                        shiftSelectedDate(years: 1)
                     }
                 }
             }
-
-            let filteredEvents = EventListView.filteredEvents(
-                events: calendarManager.events
-            )
-            if filteredEvents.isEmpty {
-                EmptyEventsView(selectedDate: selectedDate)
-                Spacer(minLength: 0)
-            } else {
-                EventListView(events: calendarManager.events)
+            MonthGrid(monthDate: selectedDate, selectedDate: selectedDate) { date in
+                selectedDate = date
             }
         }
         .listRowBackground(Color.clear)
@@ -242,6 +233,137 @@ struct CalendarView: View {
                 selectedDate = Date.now
             }
         }
+    }
+
+    private func navButton(systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.caption2)
+                .foregroundColor(Color(white: 0.8))
+                .frame(width: 12, height: 12)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    private func shiftSelectedDate(months: Int) {
+        selectedDate = adjustedDate(byAddingMonths: months, to: selectedDate)
+    }
+
+    private func shiftSelectedDate(years: Int) {
+        selectedDate = adjustedDate(byAddingYears: years, to: selectedDate)
+    }
+
+    private func adjustedDate(byAddingMonths months: Int, to date: Date) -> Date {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month, .day], from: date)
+        guard let year = comps.year, let month = comps.month, let day = comps.day else { return date }
+        let base = cal.date(from: DateComponents(year: year, month: month, day: 1)) ?? date
+        let targetMonthStart = cal.date(byAdding: .month, value: months, to: base) ?? base
+        let range = cal.range(of: .day, in: .month, for: targetMonthStart) ?? 1..<2
+        let clampedDay = min(day, range.count)
+        return cal.date(bySetting: .day, value: clampedDay, of: targetMonthStart) ?? targetMonthStart
+    }
+
+    private func adjustedDate(byAddingYears years: Int, to date: Date) -> Date {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month, .day], from: date)
+        guard let year = comps.year, let month = comps.month, let day = comps.day else { return date }
+        let base = cal.date(from: DateComponents(year: year, month: month, day: 1)) ?? date
+        let targetMonthStart = cal.date(byAdding: .year, value: years, to: base) ?? base
+        let range = cal.range(of: .day, in: .month, for: targetMonthStart) ?? 1..<2
+        let clampedDay = min(day, range.count)
+        return cal.date(bySetting: .day, value: clampedDay, of: targetMonthStart) ?? targetMonthStart
+    }
+}
+
+struct MonthGrid: View {
+    let monthDate: Date
+    let selectedDate: Date
+    let onSelect: (Date) -> Void
+
+    private let calendar = Calendar.current
+
+    private var startOfMonth: Date {
+        calendar.date(from: calendar.dateComponents([.year, .month], from: monthDate)) ?? monthDate
+    }
+
+    private var weekdaySymbols: [String] {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        var symbols = formatter.veryShortStandaloneWeekdaySymbols ?? []
+        let firstIndex = max(0, calendar.firstWeekday - 1)
+        if firstIndex > 0 {
+            symbols = Array(symbols[firstIndex...] + symbols[..<firstIndex])
+        }
+        return symbols
+    }
+
+    private var dayItems: [Date?] {
+        let range = calendar.range(of: .day, in: .month, for: startOfMonth) ?? 1..<2
+        let dayCount = range.count
+        let firstWeekday = calendar.component(.weekday, from: startOfMonth)
+        let leading = (firstWeekday - calendar.firstWeekday + 7) % 7
+        var items = Array<Date?>(repeating: nil, count: leading)
+        items.append(contentsOf: (0..<dayCount).map {
+            calendar.date(byAdding: .day, value: $0, to: startOfMonth)
+        })
+        let trailing = max(0, 42 - items.count)
+        if trailing > 0 {
+            items.append(contentsOf: Array(repeating: nil, count: trailing))
+        }
+        return items
+    }
+
+    var body: some View {
+        VStack(spacing: 2) {
+            HStack(spacing: 1) {
+                ForEach(weekdaySymbols, id: \.self) { symbol in
+                    Text(symbol)
+                        .font(.caption2)
+                        .foregroundColor(Color(white: 0.6))
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 1), count: 7),
+                spacing: 1
+            ) {
+                ForEach(0..<dayItems.count, id: \.self) { index in
+                    if let date = dayItems[index] {
+                        dayCell(for: date)
+                    } else {
+                        Color.clear
+                            .frame(height: 12)
+                    }
+                }
+            }
+        }
+    }
+
+    private func dayCell(for date: Date) -> some View {
+        let isToday = calendar.isDateInToday(date)
+        let isSelected = calendar.isDate(date, inSameDayAs: selectedDate)
+        return Button(action: {
+            onSelect(date)
+        }) {
+            ZStack {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color.effectiveAccentBackground)
+                } else if isToday {
+                    RoundedRectangle(cornerRadius: 3)
+                        .stroke(Color.effectiveAccent.opacity(0.8), lineWidth: 1)
+                }
+                Text("\(calendar.component(.day, from: date))")
+                    .font(.caption2)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                    .foregroundColor(isSelected ? .white : Color(white: isToday ? 0.9 : 0.65))
+            }
+            .frame(height: 12)
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(PlainButtonStyle())
     }
 }
 
