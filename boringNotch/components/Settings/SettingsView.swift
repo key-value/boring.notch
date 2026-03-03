@@ -600,6 +600,8 @@ struct Media: View {
     @Default(.sneakPeekStyles) var sneakPeekStyles
 
     @Default(.enableLyrics) var enableLyrics
+    @Default(.lyricsSource) var lyricsSource
+    @Default(.lxMusicApiBaseURL) var lxMusicApiBaseURL
 
     var body: some View {
         Form {
@@ -684,6 +686,15 @@ struct Media: View {
                         Text("Show lyrics below artist name")
                         customBadge(text: "Beta")
                     }
+                }
+                Picker("Lyrics source", selection: $lyricsSource) {
+                    ForEach(LyricsSource.allCases) { source in
+                        Text(source.rawValue).tag(source)
+                    }
+                }
+                if lyricsSource == .lxMusic {
+                    TextField("LX Music API Base URL", text: $lxMusicApiBaseURL)
+                        .textFieldStyle(.roundedBorder)
                 }
             } header: {
                 Text("Media controls")

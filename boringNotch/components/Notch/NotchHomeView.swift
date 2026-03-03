@@ -228,7 +228,7 @@ struct MusicControlsView: View {
         )
         let padded = slotConfig.padded(to: sanitizedLimit, filler: .none)
         let result = Array(padded.prefix(sanitizedLimit))
-        // If calendar and camera are both visible alongside music, hide the edge slots
+        // If lyrics panel and camera are both visible alongside music, hide the edge slots
         let shouldHideEdges = Defaults[.showCalendar] && Defaults[.showMirror] && webcamManager.cameraAvailable && vm.isCameraExpanded
         if shouldHideEdges && result.count >= 5 {
             return Array(result.dropFirst().dropLast())
@@ -416,6 +416,180 @@ struct VolumeControlView: View {
     }
 }
 
+struct LyricsHomeView: View {
+    @ObservedObject private var musicManager = MusicManager.shared
+    @Default(.enableLyrics) private var enableLyrics
+    @Default(.lyricsSource) private var lyricsSource
+    private let lxRefreshTimer = Timer.publish(every: 2.5, on: .main, in: .common).autoconnect()
+    private let syncedWindowSize = 7
+
+    var body: some View {
+        GeometryReader { geo in
+            let usingLX = lyricsSource == .lxMusic
+            VStack(alignment: .leading, spacing: 6) {
+                if !enableLyrics {
+                    placeholderText(
+                        title: "Lyrics disabled",
+                        subtitle: "Enable lyrics in Settings > Media"
+                    )
+                } else if !usingLX && musicManager.isPlayerIdle && !musicManager.isPlaying {
+                    placeholderText(
+                        title: "No music playing",
+                        subtitle: "Play a song to see lyrics"
+                    )
+                } else {
+                    TimelineView(.animation(minimumInterval: 0.25)) { timeline in
+                        let elapsed = currentElapsed(at: timeline.date)
+                        if musicManager.isFetchingLyrics {
+                            Text("Loading lyrics…")
+                                .font(.subheadline)
+                                .foregroundColor(.gray.opacity(0.7))
+                        } else if !musicManager.syncedLyrics.isEmpty {
+                            syncedLyricsView(at: elapsed)
+                        } else {
+                            plainLyricsView(width: max(geo.size.width, 1))
+                        }
+                    }
+                }
+            }
+            .padding(.top, 6)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .frame(height: 120)
+        .onAppear {
+            guard enableLyrics, lyricsSource == .lxMusic else { return }
+            Task { @MainActor in
+                await musicManager.refreshLXMusicLyrics(showLoading: true)
+            }
+        }
+        .onChange(of: lyricsSource) { _, newValue in
+            guard enableLyrics, newValue == .lxMusic else { return }
+            Task { @MainActor in
+                await musicManager.refreshLXMusicLyrics(showLoading: true)
+            }
+        }
+        .onReceive(lxRefreshTimer) { _ in
+            guard enableLyrics, lyricsSource == .lxMusic else { return }
+            Task { @MainActor in
+                await musicManager.refreshLXMusicLyrics(showLoading: false)
+            }
+        }
+    }
+
+    private func currentElapsed(at date: Date) -> Double {
+        guard musicManager.isPlaying else { return musicManager.elapsedTime }
+        let delta = date.timeIntervalSince(musicManager.timestampDate)
+        let progressed = musicManager.elapsedTime + (delta * musicManager.playbackRate)
+        return min(max(progressed, 0), musicManager.songDuration)
+    }
+
+    private func syncedIndex(at elapsed: Double) -> Int {
+        var low = 0
+        var high = musicManager.syncedLyrics.count - 1
+        var idx = 0
+        while low <= high {
+            let mid = (low + high) / 2
+            if musicManager.syncedLyrics[mid].time <= elapsed {
+                idx = mid
+                low = mid + 1
+            } else {
+                high = mid - 1
+            }
+        }
+        return idx
+    }
+
+    @ViewBuilder
+    private func syncedLyricsView(at elapsed: Double) -> some View {
+        let idx = syncedIndex(at: elapsed)
+        let count = musicManager.syncedLyrics.count
+        let indices = syncedWindowIndices(current: idx, count: count, windowSize: syncedWindowSize)
+        let lines = indices.map { index in
+            (index: index, text: musicManager.syncedLyrics[index].text)
+        }
+
+        VStack(spacing: 4) {
+            Spacer(minLength: 0)
+            ForEach(lines, id: \.index) { item in
+                let distance = abs(item.index - idx)
+                let isCurrent = item.index == idx
+                let opacity = max(0.35, 1.0 - Double(distance) * 0.2)
+                let scale: CGFloat = isCurrent ? 1.0 : (distance == 1 ? 0.95 : 0.9)
+                lyricLine(
+                    item.text,
+                    font: isCurrent ? .subheadline : .caption,
+                    nsFont: isCurrent ? .subheadline : .caption1,
+                    color: isCurrent ? .white : .gray.opacity(0.7),
+                    lineLimit: 1
+                )
+                .opacity(opacity)
+                .scaleEffect(scale)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    }
+
+    private func syncedWindowIndices(current: Int, count: Int, windowSize: Int) -> [Int] {
+        guard count > 0 else { return [] }
+        let desired = min(windowSize, count)
+        let radius = desired / 2
+        let maxStart = count - desired
+        let start = max(0, min(current - radius, maxStart))
+        let end = start + desired - 1
+        return Array(start...end)
+    }
+
+    @ViewBuilder
+    private func plainLyricsView(width: CGFloat) -> some View {
+        let trimmed = musicManager.currentLyrics.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            Text("No lyrics found")
+                .font(.subheadline)
+                .foregroundColor(.gray)
+        } else {
+            Text(trimmed)
+                .font(isPersian(trimmed)
+                    ? .custom("Vazirmatn-Regular", size: NSFont.preferredFont(forTextStyle: .subheadline).pointSize)
+                    : .subheadline
+                )
+                .foregroundColor(.white)
+                .lineLimit(6)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: width, alignment: .leading)
+        }
+    }
+
+    private func lyricLine(_ line: String, font: Font, nsFont: NSFont.TextStyle, color: Color, lineLimit: Int) -> some View {
+        Text(line)
+            .font(isPersian(line)
+                ? .custom("Vazirmatn-Regular", size: NSFont.preferredFont(forTextStyle: nsFont).pointSize)
+                : font
+            )
+            .foregroundColor(color)
+            .lineLimit(lineLimit)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func placeholderText(title: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.subheadline)
+                .foregroundColor(.white)
+            Text(subtitle)
+                .font(.caption)
+                .foregroundColor(.gray)
+        }
+    }
+
+    private func isPersian(_ text: String) -> Bool {
+        text.unicodeScalars.contains { scalar in
+            let v = scalar.value
+            return v >= 0x0600 && v <= 0x06FF
+        }
+    }
+}
+
 // MARK: - Main View
 
 struct NotchHomeView: View {
@@ -444,7 +618,7 @@ struct NotchHomeView: View {
             MusicPlayerView(albumArtNamespace: albumArtNamespace)
 
             if Defaults[.showCalendar] {
-                CalendarView()
+                LyricsHomeView()
                     .frame(width: shouldShowCamera ? 170 : 215)
                     .onHover { isHovering in
                         vm.isHoveringCalendar = isHovering

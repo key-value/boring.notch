@@ -12028,6 +12028,9 @@
         }
       }
     },
+    "Loading lyrics…" : {
+
+    },
     "Lottie JSON URL" : {
       "localizations" : {
         "ar" : {
@@ -12327,6 +12330,12 @@
           }
         }
       }
+    },
+    "LX Music API Base URL" : {
+
+    },
+    "Lyrics source" : {
+
     },
     "Made with 🫶🏻 by not so boring not.people" : {
       "localizations" : {
@@ -15028,6 +15037,9 @@
           }
         }
       }
+    },
+    "No lyrics found" : {
+
     },
     "Not Now" : {
       "localizations" : {

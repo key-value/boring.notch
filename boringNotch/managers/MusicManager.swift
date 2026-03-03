@@ -47,6 +47,8 @@ class MusicManager: ObservableObject {
     @Published var volume: Double = 0.5
     @Published var volumeControlSupported: Bool = true
     @ObservedObject var coordinator = BoringViewCoordinator.shared
+    @Default(.lyricsSource) private var lyricsSource
+    @Default(.lxMusicApiBaseURL) private var lxMusicApiBaseURL
     @Published var usingAppIconForArtwork: Bool = false
     @Published var currentLyrics: String = ""
     @Published var isFetchingLyrics: Bool = false
@@ -341,11 +343,37 @@ class MusicManager: ObservableObject {
     }
 
     // MARK: - Lyrics
+    @MainActor
+    func refreshLXMusicLyrics(showLoading: Bool = false) async {
+        guard Defaults[.enableLyrics], Defaults[.lyricsSource] == .lxMusic else { return }
+        if showLoading {
+            self.isFetchingLyrics = true
+        }
+        await self.fetchLyricsFromLXMusic()
+    }
+
     private func fetchLyricsIfAvailable(bundleIdentifier: String?, title: String, artist: String) {
-        guard Defaults[.enableLyrics], !title.isEmpty else {
+        guard Defaults[.enableLyrics] else {
             DispatchQueue.main.async {
                 self.isFetchingLyrics = false
                 self.currentLyrics = ""
+                self.syncedLyrics = []
+            }
+            return
+        }
+
+        if Defaults[.lyricsSource] == .lxMusic {
+            Task { @MainActor in
+                await self.refreshLXMusicLyrics(showLoading: true)
+            }
+            return
+        }
+
+        guard !title.isEmpty else {
+            DispatchQueue.main.async {
+                self.isFetchingLyrics = false
+                self.currentLyrics = ""
+                self.syncedLyrics = []
             }
             return
         }
@@ -460,13 +488,60 @@ class MusicManager: ObservableObject {
         }
     }
 
+    @MainActor
+    private func fetchLyricsFromLXMusic() async {
+        guard let baseURL = normalizedLXMusicBaseURL() else {
+            self.currentLyrics = ""
+            self.isFetchingLyrics = false
+            self.syncedLyrics = []
+            return
+        }
+
+        let url = baseURL.appendingPathComponent("lyric")
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                self.currentLyrics = ""
+                self.isFetchingLyrics = false
+                self.syncedLyrics = []
+                return
+            }
+            let lyricText = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            self.currentLyrics = lyricText
+            self.isFetchingLyrics = false
+            if lyricText.isEmpty {
+                self.syncedLyrics = []
+            } else {
+                let parsed = self.parseLRC(lyricText)
+                self.syncedLyrics = parsed
+            }
+        } catch {
+            self.currentLyrics = ""
+            self.isFetchingLyrics = false
+            self.syncedLyrics = []
+        }
+    }
+
+    private func normalizedLXMusicBaseURL() -> URL? {
+        var trimmed = lxMusicApiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return nil }
+        if !trimmed.hasPrefix("http://") && !trimmed.hasPrefix("https://") {
+            trimmed = "http://" + trimmed
+        }
+        if trimmed.hasSuffix("/") {
+            trimmed.removeLast()
+        }
+        return URL(string: trimmed)
+    }
+
     // MARK: - Synced lyrics helpers
     private func parseLRC(_ lrc: String) -> [(time: Double, text: String)] {
         var result: [(Double, String)] = []
         lrc.split(separator: "\n").forEach { lineSub in
             let line = String(lineSub)
             // Match [mm:ss.xx] or [m:ss]
-            let pattern = #"\[(\d{1,2}):(\d{2})(?:\.(\d{1,2}))?\]"#
+            let pattern = #"\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]"#
             guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
             let nsLine = line as NSString
             if let match = regex.firstMatch(in: line, range: NSRange(location: 0, length: nsLine.length)) {
@@ -476,8 +551,9 @@ class MusicManager: ObservableObject {
                 let centiStr = csRange.location != NSNotFound ? nsLine.substring(with: csRange) : "0"
                 let minutes = Double(minStr) ?? 0
                 let seconds = Double(secStr) ?? 0
-                let centis = Double(centiStr) ?? 0
-                let time = minutes * 60 + seconds + centis / 100.0
+                let fraction = Double(centiStr) ?? 0
+                let divisor: Double = centiStr.count == 3 ? 1000.0 : 100.0
+                let time = minutes * 60 + seconds + fraction / divisor
                 let textStart = match.range.location + match.range.length
                 let text = nsLine.substring(from: textStart).trimmingCharacters(in: .whitespaces)
                 if !text.isEmpty {
