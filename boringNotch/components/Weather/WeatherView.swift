@@ -16,8 +16,6 @@ struct WeatherView: View {
             content
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear {
             weather.start()
@@ -27,10 +25,10 @@ struct WeatherView: View {
     private var header: some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
-                Text("Weather")
+                Text(weather.locationName)
                     .font(.headline)
                     .foregroundColor(.white)
-                Text(weather.locationName)
+                Text(headerSubtitle)
                     .font(.caption)
                     .foregroundColor(.gray)
             }
@@ -78,6 +76,26 @@ struct WeatherView: View {
             } else {
                 LoadingStateView(text: "Loading weather...")
             }
+        }
+    }
+
+    private var headerSubtitle: String {
+        switch weather.status {
+        case .ready:
+            if let current = weather.current {
+                return WeatherManager.condition(for: current.weatherCode, isDay: current.isDay).title
+            }
+            return "Weather"
+        case .denied:
+            return "Location disabled"
+        case .error:
+            return "Weather unavailable"
+        case .requestingLocation:
+            return "Requesting location..."
+        case .loading:
+            return "Loading weather..."
+        case .idle:
+            return "Weather"
         }
     }
 }
@@ -138,14 +156,9 @@ private struct ReadyStateView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Image(systemName: condition.systemImage)
-                            .font(.title2)
-                            .foregroundColor(.white)
-                        Text(condition.title)
-                            .font(.subheadline)
-                            .foregroundColor(.white)
-                    }
+                    Image(systemName: condition.systemImage)
+                        .font(.title2)
+                        .foregroundColor(.white)
                     Text(tempString(current.temperature))
                         .font(.system(size: 24, weight: .semibold))
                         .foregroundColor(.white)
