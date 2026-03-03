@@ -17,6 +17,8 @@ struct WeatherView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 140, alignment: .top)
+        .clipped()
         .onAppear {
             weather.start()
         }
