@@ -277,6 +277,120 @@ struct CalendarView: View {
     }
 }
 
+struct CalendarModuleView: View {
+    @EnvironmentObject var vm: BoringViewModel
+    @ObservedObject private var calendarManager = CalendarManager.shared
+    @State private var selectedDate = Date()
+
+    var body: some View {
+        VStack(spacing: 6) {
+            header
+            GeometryReader { proxy in
+                let total = max(proxy.size.width, 1)
+                let rightWidth = total * 0.30
+                let leftWidth = total - rightWidth
+                HStack(alignment: .top, spacing: 8) {
+                    MonthGrid(monthDate: selectedDate, selectedDate: selectedDate) { date in
+                        selectedDate = date
+                    }
+                    .frame(width: leftWidth, alignment: .leading)
+                    DateDetailView(selectedDate: selectedDate)
+                        .frame(width: rightWidth, alignment: .leading)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .listRowBackground(Color.clear)
+        .frame(height: 140, alignment: .top)
+        .onChange(of: selectedDate) {
+            Task {
+                await calendarManager.updateCurrentDate(selectedDate)
+            }
+        }
+        .onChange(of: vm.notchState) { _, _ in
+            Task {
+                await calendarManager.updateCurrentDate(Date.now)
+                selectedDate = Date.now
+            }
+        }
+        .onAppear {
+            Task {
+                await calendarManager.updateCurrentDate(Date.now)
+                selectedDate = Date.now
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(selectedDate.formatted(.dateTime.month(.abbreviated)))
+                .font(.headline)
+                .fontWeight(.semibold)
+                .foregroundColor(.white)
+            Text(selectedDate.formatted(.dateTime.year()))
+                .font(.headline)
+                .fontWeight(.light)
+                .foregroundColor(Color(white: 0.65))
+            Spacer(minLength: 0)
+            HStack(spacing: 6) {
+                navButton(systemName: "chevron.up") {
+                    shiftSelectedDate(years: -1)
+                }
+                navButton(systemName: "chevron.left") {
+                    shiftSelectedDate(months: -1)
+                }
+                navButton(systemName: "chevron.right") {
+                    shiftSelectedDate(months: 1)
+                }
+                navButton(systemName: "chevron.down") {
+                    shiftSelectedDate(years: 1)
+                }
+            }
+        }
+    }
+
+    private func navButton(systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.caption2)
+                .foregroundColor(Color(white: 0.8))
+                .frame(width: 12, height: 12)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    private func shiftSelectedDate(months: Int) {
+        selectedDate = adjustedDate(byAddingMonths: months, to: selectedDate)
+    }
+
+    private func shiftSelectedDate(years: Int) {
+        selectedDate = adjustedDate(byAddingYears: years, to: selectedDate)
+    }
+
+    private func adjustedDate(byAddingMonths months: Int, to date: Date) -> Date {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month, .day], from: date)
+        guard let year = comps.year, let month = comps.month, let day = comps.day else { return date }
+        let base = cal.date(from: DateComponents(year: year, month: month, day: 1)) ?? date
+        let targetMonthStart = cal.date(byAdding: .month, value: months, to: base) ?? base
+        let range = cal.range(of: .day, in: .month, for: targetMonthStart) ?? 1..<2
+        let clampedDay = min(day, range.count)
+        return cal.date(bySetting: .day, value: clampedDay, of: targetMonthStart) ?? targetMonthStart
+    }
+
+    private func adjustedDate(byAddingYears years: Int, to date: Date) -> Date {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month, .day], from: date)
+        guard let year = comps.year, let month = comps.month, let day = comps.day else { return date }
+        let base = cal.date(from: DateComponents(year: year, month: month, day: 1)) ?? date
+        let targetMonthStart = cal.date(byAdding: .year, value: years, to: base) ?? base
+        let range = cal.range(of: .day, in: .month, for: targetMonthStart) ?? 1..<2
+        let clampedDay = min(day, range.count)
+        return cal.date(bySetting: .day, value: clampedDay, of: targetMonthStart) ?? targetMonthStart
+    }
+}
+
 struct MonthGrid: View {
     let monthDate: Date
     let selectedDate: Date
@@ -355,15 +469,176 @@ struct MonthGrid: View {
                     RoundedRectangle(cornerRadius: 3)
                         .stroke(Color.effectiveAccent.opacity(0.8), lineWidth: 1)
                 }
-                Text("\(calendar.component(.day, from: date))")
-                    .font(.caption2)
-                    .fontWeight(isSelected ? .semibold : .regular)
-                    .foregroundColor(isSelected ? .white : Color(white: isToday ? 0.9 : 0.65))
+                HStack(spacing: 4) {
+                    Text("\(calendar.component(.day, from: date))")
+                        .font(.caption2)
+                        .fontWeight(isSelected ? .semibold : .regular)
+                        .foregroundColor(isSelected ? .white : Color(white: isToday ? 0.9 : 0.65))
+                    Text(lunarDayString(for: date))
+                        .font(.caption2)
+                        .scaleEffect(0.6, anchor: .center)
+                        .foregroundColor(isSelected ? .white.opacity(0.9) : Color(white: 0.55))
+                }
             }
-            .frame(height: 12)
+            .frame(height: 16)
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(PlainButtonStyle())
+    }
+
+    private func lunarDayString(for date: Date) -> String {
+        let chinese = Calendar(identifier: .chinese)
+        let comps = chinese.dateComponents([.month, .day, .isLeapMonth], from: date)
+        let month = comps.month ?? 1
+        let day = comps.day ?? 1
+        let isLeap = comps.isLeapMonth ?? false
+        let monthNames = ["正", "二", "三", "四", "五", "六", "七", "八", "九", "十", "冬", "腊"]
+        let dayNames = [
+            "初一", "初二", "初三", "初四", "初五", "初六", "初七", "初八", "初九", "初十",
+            "十一", "十二", "十三", "十四", "十五", "十六", "十七", "十八", "十九", "二十",
+            "廿一", "廿二", "廿三", "廿四", "廿五", "廿六", "廿七", "廿八", "廿九", "三十"
+        ]
+        let monthIndex = max(1, min(month, 12)) - 1
+        let dayIndex = max(1, min(day, 30)) - 1
+        let monthName = monthIndex < monthNames.count ? monthNames[monthIndex] : "正"
+        let dayName = dayIndex < dayNames.count ? dayNames[dayIndex] : "初一"
+        if day == 1 {
+            return "\(isLeap ? "闰" : "")\(monthName)月"
+        }
+        return dayName
+    }
+}
+
+struct WeekWheelView: View {
+    @Binding var selectedDate: Date
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            WheelPicker(
+                selectedDate: $selectedDate,
+                config: Config(past: 3, future: 3, steps: 1, spacing: 0, showsText: true, offset: 1)
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(alignment: .top) {
+                LinearGradient(
+                    colors: [Color.black, .clear], startPoint: .leading, endPoint: .trailing
+                )
+                .frame(width: 14)
+                Spacer()
+                LinearGradient(
+                    colors: [.clear, Color.black], startPoint: .leading, endPoint: .trailing
+                )
+                .frame(width: 14)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 50, maxHeight: 50, alignment: .leading)
+    }
+}
+
+struct DateDetailView: View {
+    let selectedDate: Date
+
+    private var dateString: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "M月d日"
+        return formatter.string(from: selectedDate)
+    }
+
+    private var weekdayString: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "EEEE"
+        return formatter.string(from: selectedDate)
+    }
+
+    private var lunarString: String {
+        let calendar = Calendar(identifier: .chinese)
+        let comps = calendar.dateComponents([.month, .day, .isLeapMonth], from: selectedDate)
+        let month = comps.month ?? 1
+        let day = comps.day ?? 1
+        let isLeap = comps.isLeapMonth ?? false
+        let monthNames = ["正月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "冬月", "腊月"]
+        let dayNames = [
+            "初一", "初二", "初三", "初四", "初五", "初六", "初七", "初八", "初九", "初十",
+            "十一", "十二", "十三", "十四", "十五", "十六", "十七", "十八", "十九", "二十",
+            "廿一", "廿二", "廿三", "廿四", "廿五", "廿六", "廿七", "廿八", "廿九", "三十"
+        ]
+        let monthIndex = max(1, min(month, 12)) - 1
+        let dayIndex = max(1, min(day, 30)) - 1
+        let monthName = monthIndex < monthNames.count ? monthNames[monthIndex] : "正月"
+        let dayName = dayIndex < dayNames.count ? dayNames[dayIndex] : "初一"
+        return "农历 \(isLeap ? "闰" : "")\(monthName)\(dayName)"
+    }
+
+    private var holidayString: String {
+        holidayName(for: selectedDate) ?? "节假日：无"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(dateString)
+                .font(.title3)
+                .fontWeight(.semibold)
+                .foregroundColor(.white)
+            Text(weekdayString)
+                .font(.caption)
+                .foregroundColor(Color(white: 0.65))
+            Text(lunarString)
+                .font(.caption)
+                .foregroundColor(Color(white: 0.65))
+            Text(holidayString)
+                .font(.caption)
+                .foregroundColor(Color(white: 0.8))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func holidayName(for date: Date) -> String? {
+        let gregorian = Calendar.current
+        let comps = gregorian.dateComponents([.month, .day], from: date)
+        let month = comps.month ?? 0
+        let day = comps.day ?? 0
+        let solarKey = String(format: "%02d-%02d", month, day)
+        let solarHolidays: [String: String] = [
+            "01-01": "节假日：元旦",
+            "05-01": "节假日：劳动节",
+            "10-01": "节假日：国庆节"
+        ]
+        if let solar = solarHolidays[solarKey] {
+            return solar
+        }
+
+        let chinese = Calendar(identifier: .chinese)
+        let lunar = chinese.dateComponents([.month, .day, .isLeapMonth], from: date)
+        guard let lunarMonth = lunar.month, let lunarDay = lunar.day else { return nil }
+        if lunar.isLeapMonth == true { return nil }
+        let lunarKey = String(format: "%02d-%02d", lunarMonth, lunarDay)
+        let lunarHolidays: [String: String] = [
+            "01-01": "节假日：春节",
+            "01-15": "节假日：元宵节",
+            "05-05": "节假日：端午节",
+            "07-07": "节假日：七夕",
+            "08-15": "节假日：中秋节",
+            "09-09": "节假日：重阳节",
+            "12-08": "节假日：腊八",
+            "12-23": "节假日：小年"
+        ]
+        if let lunarHoliday = lunarHolidays[lunarKey] {
+            return lunarHoliday
+        }
+
+        // 除夕：腊月最后一天
+        if lunarMonth == 12 {
+            let range = chinese.range(of: .day, in: .month, for: date) ?? 1..<2
+            if lunarDay == range.count {
+                return "节假日：除夕"
+            }
+        }
+
+        return nil
     }
 }
 

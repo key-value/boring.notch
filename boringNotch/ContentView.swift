@@ -351,6 +351,8 @@ struct ContentView: View {
                         ShelfView()
                     case .weather:
                         WeatherView()
+                    case .calendar:
+                        CalendarModuleView()
                     }
                 }
                 .transition(
